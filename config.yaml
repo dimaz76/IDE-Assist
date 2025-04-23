@@ -1,0 +1,4 @@
+input: data/input.csv
+output: data/out.csv
+threshold: 10
+
