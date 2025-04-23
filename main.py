@@ -3,7 +3,8 @@
 """
 Main script entrypoint.
 Авторы: [Ваше Имя]
-Описание: Скрипт из ТЗ с поддержкой CSV, JSON и Excel; фильтрация по порогу; логирование; dry-run.
+Описание: Скрипт из ТЗ с поддержкой CSV, JSON и Excel;
+фильтрация по порогу; логирование; dry-run.
 """
 
 import argparse
@@ -29,15 +30,21 @@ def parse_args():
         description="Скрипт из ТЗ с поддержкой разных форматов и фильтром"
     )
     parser.add_argument(
-        '-c','--config', required=True,
+        '-c',
+        '--config',
+        required=True,
         help='Путь к файлу конфигурации (JSON или YAML)'
     )
     parser.add_argument(
-        '-l','--log', choices=['DEBUG','INFO','WARNING','ERROR'],
-        default='INFO', help='Уровень логирования'
+        '-l',
+        '--log',
+        choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+        default='INFO',
+        help='Уровень логирования'
     )
     parser.add_argument(
-        '--dry-run', action='store_true',
+        '--dry-run',
+        action='store_true',
         help='Не сохранять файлы, только логировать'
     )
     return parser.parse_args()
@@ -49,14 +56,14 @@ def load_config(path):
         raise FileNotFoundError(f"Конфиг не найден: {path}")
     ext = os.path.splitext(path)[1].lower()
     with open(path, 'r', encoding='utf-8') as f:
-        cfg = yaml.safe_load(f) if ext in ('.yaml','.yml') else json.load(f)
-    # Проверка обязательных полей
-    for key in ('input','output'):
+        if ext in ('.yaml', '.yml'):
+            cfg = yaml.safe_load(f)
+        else:
+            cfg = json.load(f)
+    for key in ('input', 'output'):
         if key not in cfg:
             raise KeyError(f"В конфиге нет поля '{key}'")
-    # Дефолтный порог фильтрации
     threshold = cfg.get('threshold', 10)
-    # Проверяем тип порога
     if not isinstance(threshold, (int, float)):
         raise ValueError(f"Неверный порог фильтрации: {threshold}")
     return cfg['input'], cfg['output'], threshold
@@ -81,7 +88,7 @@ def load_data(path):
 
 
 def process_data(data, threshold):
-    """Обработка данных: оставляем только записи с value > threshold"""
+    """Обработка данных: оставляем записи с value > threshold"""
     logging.info(f"Обрабатываем данные, threshold={threshold}")
     filtered = []
     for row in data:
@@ -106,8 +113,9 @@ def save_result(result, path, dry_run=False):
     ext = os.path.splitext(path)[1].lower()
     if ext == '.csv':
         with open(path, 'w', newline='', encoding='utf-8') as f:
-            w = csv.DictWriter(f, fieldnames=result[0].keys())
-            w.writeheader(); w.writerows(result)
+            writer = csv.DictWriter(f, fieldnames=result[0].keys())
+            writer.writeheader()
+            writer.writerows(result)
     elif ext == '.json':
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -123,7 +131,6 @@ def main():
     setup_logging(getattr(logging, args.log))
     logging.info(f"Уровень логирования: {args.log}")
 
-    # вход, выход и порог из конфига
     try:
         input_path, output_path, threshold = load_config(args.config)
     except Exception:
@@ -139,6 +146,7 @@ def main():
         sys.exit(1)
 
     logging.info("Готово!")
+
 
 if __name__ == '__main__':
     main()
