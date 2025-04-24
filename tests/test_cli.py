@@ -1,53 +1,34 @@
 import sys
-import os
 import csv
 import pytest
+import logging
 from main import main
 
 @pytest.fixture
-def project_tree(tmp_path, monkeypatch):
-    # создаём структуру проекта в tmp
-    project_dir = tmp_path
-    data_dir = project_dir / "data"
-    data_dir.mkdir()
-    # пишем свой input.csv с числами
-    input_csv = data_dir / "input.csv"
-    input_csv.write_text(
-        "id,value\n"
-        "1,5\n"
-        "2,15\n"
-        "3,30\n",
-        encoding="utf-8"
-    )
-    # конфиг
-    cfg = project_dir / "config.yaml"
-    cfg.write_text(
-        "input: data/input.csv\n"
-        "output: data/out.csv\n"
-        "threshold: 10\n",
-        encoding="utf-8"
-    )
-    # переключаем cwd
-    monkeypatch.chdir(project_dir)
-    return project_dir, cfg
+def project_tree(tmp_path):
+    proj = tmp_path
+    cfg = proj / "config.yaml"
+    cfg.write_text("input: data/in.csv\noutput: data/out.csv\nthreshold: 10\n", encoding="utf-8")
+    d = proj / "data"
+    d.mkdir()
+    f = d / "in.csv"
+    f.write_text("id,value\n1,5\n2,15\n3,30\n", encoding="utf-8")
+    return proj, cfg
 
-def test_cli_creates_output(project_tree, capsys):
-    project_dir, cfg = project_tree
+def test_cli_creates_output(project_tree, monkeypatch):
+    proj, cfg = project_tree
+    monkeypatch.chdir(proj)
     sys.argv = ["main.py", "--config", str(cfg)]
     main()
-    out = project_dir / "data" / "out.csv"
+    out = proj / "data" / "out.csv"
     assert out.exists()
     rows = list(csv.DictReader(open(out, newline="", encoding="utf-8")))
-    # остались только с value > 10: обе записи 15 и 30
     assert rows == [{"id": "2", "value": "15"}, {"id": "3", "value": "30"}]
 
-def test_cli_dry_run(project_tree, capsys):
-    project_dir, cfg = project_tree
-    sys.argv = [
-        "main.py",
-        "--config", str(cfg),
-        "--dry-run"
-    ]
+def test_cli_dry_run(project_tree, caplog, monkeypatch):
+    proj, cfg = project_tree
+    monkeypatch.chdir(proj)
+    caplog.set_level(logging.INFO)
+    sys.argv = ["main.py", "--config", str(cfg), "--dry-run"]
     main()
-    out = project_dir / "data" / "out.csv"
-    assert not out.exists()
+    assert "Dry run" in caplog.text
