@@ -18,7 +18,6 @@ def _patched_read_excel(io, *args, **kwargs):
 
 pd.read_excel = _patched_read_excel
 
-
 logging.basicConfig(level=logging.INFO)
 
 
@@ -54,6 +53,7 @@ def load_data(path: str) -> list[dict]:
         df = pd.read_csv(path, dtype=str)
     elif ext == '.json':
         try:
+            # type: ignore[arg-type]
             df = pd.read_json(path, dtype=str)
         except ValueError:
             with open(path, 'r', encoding='utf-8') as f:
@@ -68,7 +68,7 @@ def load_data(path: str) -> list[dict]:
 
 def process_data(data: list[dict], threshold: int = 10) -> list[dict]:
     """Фильтрация записей по порогу threshold."""
-    result = []
+    result: list[dict] = []
     for row in data:
         try:
             if int(row.get('value', 0)) > threshold:
@@ -93,6 +93,7 @@ def save_result(data: list[dict], path: str, dry_run: bool = False) -> None:
     ext = os.path.splitext(path)[1].lower()
     if ext == '.csv':
         with open(path, 'w', newline='', encoding='utf-8') as f:
+            # type: ignore[var-annotated]
             writer = csv.DictWriter(f, fieldnames=list(data[0].keys()))
             writer.writeheader()
             writer.writerows(data)
