@@ -1,151 +1,131 @@
 import os
+import sys
 import json
-import yaml
 import csv
 import logging
 import argparse
-
+from typing import Tuple, List, Dict, Any
+import yaml
 import pandas as pd
-from openpyxl import Workbook
 
-# Патч для pandas.read_excel: читать все значения как строки
-_original_read_excel = pd.read_excel
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
-def _patched_read_excel(io, *args, **kwargs):
-    return _original_read_excel(io, *args, dtype=str, **kwargs)
-
-
-pd.read_excel = _patched_read_excel
-
-logging.basicConfig(level=logging.INFO)
-
-
-def load_config(path: str) -> tuple[str, str, int]:
+def load_config(path: str) -> Tuple[str, str, int]:
     """Загрузка конфигурации из YAML или JSON файла."""
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"Config file '{path}' not found.")
+        raise FileNotFoundError(f"Config file '{path}' not found")
+
     ext = os.path.splitext(path)[1].lower()
-    with open(path, 'r', encoding='utf-8') as f:
-        if ext in ('.yaml', '.yml'):
-            cfg = yaml.safe_load(f)
-        elif ext == '.json':
-            cfg = json.load(f)
-        else:
-            raise ValueError(f"Unsupported config format '{ext}'")
-    for key in ('input', 'output'):
-        if key not in cfg:
-            raise KeyError(f"Config file is missing key: {key}")
-    raw_thr = cfg.get('threshold', 10)
     try:
-        thr = int(raw_thr)
+        with open(path, "r", encoding="utf-8") as f:
+            if ext in (".yaml", ".yml"):
+                cfg = yaml.safe_load(f)
+            elif ext == ".json":
+                cfg = json.load(f)
+            else:
+                raise ValueError(f"Unsupported config format '{ext}'")
+    except Exception as e:
+        raise e
+
+    # Проверяем обязательные ключи
+    if "input" not in cfg or "output" not in cfg:
+        raise KeyError("Config missing 'input' or 'output' keys")
+
+    inp = cfg["input"]
+    outp = cfg["output"]
+    thr = cfg.get("threshold", 0)
+    try:
+        thr = int(thr)
     except Exception:
-        raise ValueError(f"Invalid threshold '{raw_thr}'")
-    return cfg['input'], cfg['output'], thr
+        logging.warning("Invalid threshold '%s', using 0.", cfg.get("threshold"))
+        thr = 0
+
+    return inp, outp, thr
 
 
-def load_data(path: str) -> list[dict]:
+def load_data(path: str) -> List[Dict[str, Any]]:
     """Загрузка данных из CSV, JSON или Excel файлов."""
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"Data file '{path}' not found.")
+        raise FileNotFoundError(f"Data file '{path}' not found")
+
     ext = os.path.splitext(path)[1].lower()
-    if ext == '.csv':
-        df = pd.read_csv(path, dtype=str)
-    elif ext == '.json':
+    if ext == ".csv":
+        return list(csv.DictReader(open(path, newline="", encoding="utf-8")))
+    elif ext == ".json":
         try:
-            # type: ignore[arg-type]
-            df = pd.read_json(path, dtype=str)
+            df = pd.read_json(path)  # type: ignore
         except ValueError:
-            with open(path, 'r', encoding='utf-8') as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            df = pd.DataFrame(data)
-    elif ext in ('.xls', '.xlsx'):
+            return list(data)  # type: ignore
+        return df.to_dict(orient="records")  # type: ignore
+    elif ext in (".xls", ".xlsx"):
         df = pd.read_excel(path)
+        return df.to_dict(orient="records")  # type: ignore
     else:
         raise ValueError(f"Unsupported data format '{ext}'")
-    return df.to_dict(orient='records')
 
 
-def process_data(data: list[dict], threshold: int = 10) -> list[dict]:
-    """Фильтрация записей по порогу threshold."""
-    result: list[dict] = []
+def process_data(
+    data: List[Dict[str, Any]], threshold: int = 0
+) -> List[Dict[str, Any]]:
+    """Фильтрация записей, где value > threshold."""
+    result: List[Dict[str, Any]] = []
     for row in data:
         try:
-            if int(row.get('value', 0)) > threshold:
-                result.append({'id': row.get('id', ''), 'value': row.get('value', '')})
+            val = int(row.get("value", 0))
         except Exception:
             continue
+        if val > threshold:
+            result.append({"id": row.get("id", ""), "value": str(val)})
     return result
 
 
-def save_result(data: list[dict], path: str, dry_run: bool = False) -> None:
-    """Сохранение результата в CSV, JSON или Excel."""
+def save_result(data: List[Dict[str, Any]], path: str, dry_run: bool = False) -> None:
+    """Сохранение результата в CSV, JSON или Excel файл."""
     if dry_run:
-        logging.info('Dry run: would save %d rows to %s', len(data), path)
+        logging.info("Dry run: would save %d rows to %s", len(data), path)
         return
 
-    if not data:
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', 'value'])
-        return
+    # Создаем папку, если не существует
+    os.makedirs(os.path.dirname(path), exist_ok=True)
 
     ext = os.path.splitext(path)[1].lower()
-    if ext == '.csv':
-        with open(path, 'w', newline='', encoding='utf-8') as f:
-            # type: ignore[var-annotated]
-            writer = csv.DictWriter(f, fieldnames=list(data[0].keys()))
+    if ext == ".csv":
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=["id", "value"])
             writer.writeheader()
             writer.writerows(data)
-    elif ext == '.json':
-        with open(path, 'w', encoding='utf-8') as f:
+    elif ext == ".json":
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    elif ext in ('.xls', '.xlsx'):
+    elif ext in (".xls", ".xlsx"):
+        from openpyxl import Workbook  # type: ignore
+
         wb = Workbook()
         ws = wb.active
-        headers = list(data[0].keys())
-
-        # Запись заголовка как строк
-        for col_idx, h in enumerate(headers, start=1):
-            cell = ws.cell(row=1, column=col_idx, value=h)
-            cell.data_type = 's'
-
-        # Запись данных как строки
-        for row_idx, row in enumerate(data, start=2):
-            for col_idx, h in enumerate(headers, start=1):
-                cell = ws.cell(row=row_idx, column=col_idx, value=str(row[h]))
-                cell.data_type = 's'
-
+        ws.append(["id", "value"])
+        for row in data:
+            ws.append([row.get("id", ""), row.get("value", "")])
         wb.save(path)
     else:
         raise ValueError(f"Unsupported output format '{ext}'")
 
 
 def parse_args() -> argparse.Namespace:
-    """Парсинг аргументов командной строки."""
-    parser = argparse.ArgumentParser(
-        prog='main.py',
-        description='IDE-Assist script skeleton'
-    )
-    parser.add_argument(
-        '-c', '--config', default='config.yaml',
-        help='Path to config file'
-    )
-    parser.add_argument(
-        '--dry-run', action='store_true',
-        help='Do not write output'
-    )
-    parser.add_argument(
-        '-v', '--verbose', action='store_true',
-        help='Verbose logging'
-    )
+    parser = argparse.ArgumentParser(description="IDE-Assist script")
+    parser.add_argument("-c", "--config", default="config.yaml", help="Path to config file")
+    parser.add_argument("-v", "--version", action="store_true", help="Show version")
+    parser.add_argument("--dry-run", action="store_true", help="Dry run mode")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    if args.version:
+        print("IDE-Assist version 1.0")
+        return
 
     inp, outp, thr = load_config(args.config)
     data = load_data(inp)
@@ -153,5 +133,5 @@ def main() -> None:
     save_result(processed, outp, dry_run=args.dry_run)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
